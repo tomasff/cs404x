@@ -8,7 +8,6 @@ class MessageKind(IntEnum):
     QUEUED = auto()
     START = auto()
     END = auto()
-    WIN = auto()
 
     INFO = auto()
     WARNING = auto()

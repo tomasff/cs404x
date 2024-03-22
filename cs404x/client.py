@@ -85,16 +85,28 @@ async def _on_end(
         state.current_auction_telemetry,
     )
 
-    auctions_won = (
-        state.auctions_won + 1 if message.value["won"] else state.auctions_won
-    )
+    if message.value["participants"] == 1:
+        logging.info(
+            "Auction terminatted early (only 1 participant): ignored."
+        )
 
-    return dataclasses.replace(
-        state,
-        auctions_total=state.auctions_total + 1,
-        auctions_won=auctions_won,
-        current_auction_telemetry=[],
-    )
+        return dataclasses.replace(
+            state,
+            current_auction_telemetry=[],
+        )
+    else:
+        auctions_won = (
+            state.auctions_won + 1
+            if message.value["won"]
+            else state.auctions_won
+        )
+
+        return dataclasses.replace(
+            state,
+            auctions_total=state.auctions_total + 1,
+            auctions_won=auctions_won,
+            current_auction_telemetry=[],
+        )
 
 
 async def _on_telemetry(
