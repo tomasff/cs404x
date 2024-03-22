@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cs404x"
+description = "CS404 remote arena"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+dependencies = [
+    "websockets",
+    "msgspec",
+]
+version = "0.0.1"
+
+[project.optional-dependencies]
+dev = ["ruff"]
+
+[project.scripts]
+cs404x-server = "cs404x.server:main"
+cs404x-client = "cs404x.client:main"
+
+[tool.setuptools]
+packages = ["cs404x"]
+
+[tool.ruff]
+line-length = 79
+indent-width = 4
+target-version = "py311"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
