@@ -1,16 +1,18 @@
 import argparse
 import asyncio
 import csv
+import dataclasses
 import logging
 import uuid
+from collections.abc import Callable
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, Awaitable
 from urllib.parse import quote_plus
 
 import msgspec
-from websockets import connect
+from websockets import WebSocketClientProtocol, connect
 
 from cs404x.messages import Message, MessageKind
 
@@ -32,6 +34,106 @@ def save_auction_telemetry(path: Path, telemetry: list[dict[Any, Any]]):
         csv_writer.writerows(telemetry)
 
 
+@dataclasses.dataclass
+class ClientState:
+    bot: Any
+    bot_cls: type
+    telemetry_base: Path
+    auctions_won: int = 0
+    auctions_total: int = 0
+    current_auction_telemetry: list[Any] = dataclasses.field(
+        default_factory=list,
+    )
+
+
+async def _on_info(
+    _: WebSocketClientProtocol,
+    state: ClientState,
+    message: Message,
+) -> ClientState:
+    logging.info(message.value)
+    return state
+
+
+async def _on_queued(
+    _: WebSocketClientProtocol,
+    state: ClientState,
+    message: Message,
+) -> ClientState:
+    logging.info("Waiting in the queue: %s", message.value)
+    return state
+
+
+async def _on_start(
+    websocket: WebSocketClientProtocol,
+    state: ClientState,
+    message: Message,
+) -> ClientState:
+    logging.info("Auction starting...")
+    return dataclasses.replace(state, bot=state.bot_cls())
+
+
+async def _on_end(
+    websocket: WebSocketClientProtocol,
+    state: ClientState,
+    message: Message,
+) -> ClientState:
+    logging.info("Auction ended: %s", message.value)
+
+    save_auction_telemetry(
+        (state.telemetry_base / str(uuid.uuid4())).with_suffix(".csv"),
+        state.current_auction_telemetry,
+    )
+
+    auctions_won = (
+        state.auctions_won + 1 if message.value["won"] else state.auctions_won
+    )
+
+    return dataclasses.replace(
+        state,
+        auctions_total=state.auctions_total + 1,
+        auctions_won=auctions_won,
+        current_auction_telemetry=[],
+    )
+
+
+async def _on_telemetry(
+    websocket: WebSocketClientProtocol,
+    state: ClientState,
+    message: Message,
+) -> ClientState:
+    logging.debug(
+        "Received auction round telemetry: %s.",
+        message.value,
+    )
+    state.current_auction_telemetry.append(message.value)
+
+    return state
+
+
+async def _on_bid_request(
+    websocket: WebSocketClientProtocol,
+    state: ClientState,
+    message: Message,
+) -> ClientState:
+    logging.debug("Received bid request.")
+
+    bid = state.bot.get_bid(**message.value)
+
+    logging.debug("Bidding %f", bid)
+
+    await websocket.send(
+        msgspec.msgpack.encode(Message(MessageKind.BID_REPLY, value=bid))
+    )
+
+    return state
+
+
+EventHandler = Callable[
+    [WebSocketClientProtocol, ClientState, Message], Awaitable[ClientState]
+]
+
+
 async def client(
     *,
     address: str,
@@ -39,59 +141,44 @@ async def client(
     username: str,
     bot_cls: type,
     telemetry_base: Path,
+    num_auctions: int,
 ):
     arena_uri = f"ws://{address}:{port}/?username={quote_plus(username)}"
 
-    bot = None
-    auctions_won = 0
-    current_auction_telemetry = []
+    state = ClientState(
+        bot=None,
+        bot_cls=bot_cls,
+        telemetry_base=telemetry_base,
+    )
 
     async with connect(arena_uri) as websocket:
         async for message in websocket:
             message: Message = msgspec.msgpack.decode(message, type=Message)
 
-            if message.kind == MessageKind.INFO:
-                logging.info(message.value)
-            elif message.kind == MessageKind.QUEUED:
-                logging.info("Waiting in the queue: %s", message.value)
-            elif message.kind == MessageKind.START:
-                logging.info("Auction starting...")
-                bot = bot_cls()
-            elif message.kind == MessageKind.END:
-                logging.info("Auction ended...")
+            on_event_handler: dict[MessageKind, EventHandler] = {
+                MessageKind.INFO: _on_info,
+                MessageKind.QUEUED: _on_queued,
+                MessageKind.START: _on_start,
+                MessageKind.END: _on_end,
+                MessageKind.ROUND_TELEMETRY: _on_telemetry,
+                MessageKind.BID_REQUEST: _on_bid_request,
+            }
 
-                save_auction_telemetry(
-                    telemetry_base / f"{uuid.uuid4()}.csv",
-                    current_auction_telemetry,
-                )
+            state = await on_event_handler[message.kind](
+                websocket,
+                state,
+                message,
+            )
 
-                current_auction_telemetry.clear()
-            elif message.kind == MessageKind.WIN:
-                auctions_won += 1
+            if state.auctions_total == num_auctions:
+                break
 
-                logging.info(
-                    "You won the auction (%d auctions won so far) (%d total players in auction).",
-                    auctions_won,
-                    message.value,
-                )
-            elif message.kind == MessageKind.ROUND_TELEMETRY:
-                logging.info(
-                    "Received auction round telemetry: %s.",
-                    message.value,
-                )
-                current_auction_telemetry.append(message.value)
-            elif message.kind == MessageKind.BID_REQUEST:
-                logging.info("Received bid request.")
-
-                bid = bot.get_bid(**message.value)
-
-                logging.info("Bidding %f", bid)
-
-                await websocket.send(
-                    msgspec.msgpack.encode(
-                        Message(MessageKind.BID_REPLY, value=bid)
-                    )
-                )
+    logging.info(
+        "Finished, win rate: %f, total auctions %d, auctions won %d",
+        state.auctions_won / state.auctions_total,
+        state.auctions_total,
+        state.auctions_won,
+    )
 
 
 def _load_bot_module(path: Path) -> ModuleType:
@@ -132,6 +219,12 @@ def main():
         required=True,
     )
     parser.add_argument(
+        "--num-auctions",
+        help="Number of auctions you want to take part in.",
+        type=int,
+        default=50,
+    )
+    parser.add_argument(
         "--telemetry-base",
         help="Directory where telemetry for each auction is to be stored.",
         type=Path,
@@ -150,6 +243,7 @@ def main():
             bot_cls=bot_module.Bot,
             address=args.address,
             port=args.port,
+            num_auctions=args.num_auctions,
             telemetry_base=args.telemetry_base,
         )
     )

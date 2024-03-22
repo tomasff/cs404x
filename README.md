@@ -56,7 +56,8 @@ cs404x-client --username your_display_name \
     --address 127.0.0.1 \
     --port 4040 \
     --bot path/to/your/bot.py \
-    --telemetry-base telemetry/
+    --telemetry-base telemetry/ \
+    --num-auctions 20
 ```
 
 ## Acknowledgements

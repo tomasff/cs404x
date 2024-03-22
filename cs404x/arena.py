@@ -34,8 +34,8 @@ async def broadcast_message(
 
 class Arena:
     _MIN_PLAYERS = 2
-    _TIMEOUT_START = 15
-    _BID_TIMEOUT = 0.25
+    _TIMEOUT_START = 0
+    _BID_TIMEOUT = 0.10
 
     def __init__(self):
         self._registration_lock = asyncio.Lock()
@@ -58,7 +58,7 @@ class Arena:
                 participant.user_id,
             )
             self._participants_waiting.discard(participant)
-            self._participants_in_game.pop(participant, None)
+            self._participants_in_game.pop(participant.user_id, None)
 
     async def register(self, participant: Participant):
         async with self._registration_lock:
@@ -81,7 +81,7 @@ class Arena:
                 ),
             )
 
-            self._start_if_possible()
+        self._start_if_possible()
 
     def _start_if_possible(self):
         if (
@@ -156,22 +156,20 @@ class Arena:
             )
 
     async def _finish_auction(self):
-        winners = self._auction.compute_auction_winners()
+        winners = set(self._auction.compute_auction_winners())
 
-        await broadcast_message(
-            participants=(
-                self._participants_in_game[winner] for winner in winners
-            ),
-            message=Message(
-                MessageKind.WIN,
-                value=len(self._participants_in_game),
-            ),
-        )
+        for participant_id, participant in self._participants_in_game.items():
+            participant_message = {
+                "won": participant_id in winners,
+                "participants": len(self._participants_in_game),
+            }
 
-        await broadcast_message(
-            self._participants_in_game.values(),
-            message=Message(MessageKind.END),
-        )
+            asyncio.create_task(
+                self._send_message(
+                    participant,
+                    Message(MessageKind.END, value=participant_message),
+                )
+            )
 
         async with self._registration_lock:
             self._auction = None
