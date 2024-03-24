@@ -41,6 +41,9 @@ class Arena:
         self._registration_lock = asyncio.Lock()
         self._sufficient_players_event = asyncio.Event()
 
+        self._bids_received = 0
+        self._all_bids_received_event = asyncio.Condition()
+
         self._participants_waiting = set()
         self._participants_in_game = {}
 
@@ -122,7 +125,15 @@ class Arena:
         self._auction.start_round()
 
         await self._request_bids(self._participants_in_game.values())
-        await asyncio.sleep(self._BID_TIMEOUT)
+
+        async with self._all_bids_received_event:
+            try:
+                await asyncio.wait_for(
+                    self._all_bids_received_event.wait(),
+                    self._BID_TIMEOUT,
+                )
+            except TimeoutError:
+                logging.warning("Did not receive all bids...continuing")
 
         if len(self._participants_in_game) < self._MIN_PLAYERS:
             logging.info(
@@ -211,31 +222,44 @@ class Arena:
         except ConnectionClosed:
             await self.deregister(participant)
 
+    async def _on_bid_reply(self, participant: Participant, message: Message):
+        if participant in self._participants_waiting:
+            await self._send_message(
+                participant,
+                Message(
+                    MessageKind.WARNING, value="Can't bid while in queue."
+                ),
+            )
+            return
+
+        within_budget = self._auction.register_bid(
+            player_id=participant.user_id,
+            bid=message.value,
+        )
+
+        if not within_budget:
+            await self._send_message(
+                participant,
+                Message(
+                    MessageKind.WARNING,
+                    value="Bid exceeds budget available.",
+                ),
+            )
+        else:
+            await self._count_bids()
+
+    async def _count_bids(self):
+        async with self._all_bids_received_event, self._registration_lock:
+            self._bids_received += 1
+
+            if self._bids_received == len(self._participants_in_game):
+                self._bids_received = 0
+                self._all_bids_received_event.notify_all()
+
     async def on_message(
         self,
         participant: Participant,
         message: Message,
     ):
         if message.kind == MessageKind.BID_REPLY:
-            if participant in self._participants_waiting:
-                await self._send_message(
-                    participant,
-                    Message(
-                        MessageKind.WARNING, value="Can't bid while in queue."
-                    ),
-                )
-                return
-
-            within_budget = self._auction.register_bid(
-                player_id=participant.user_id,
-                bid=message.value,
-            )
-
-            if not within_budget:
-                await self._send_message(
-                    participant,
-                    Message(
-                        MessageKind.WARNING,
-                        value="Bid exceeds budget available.",
-                    ),
-                )
+            await self._on_bid_reply(participant, message)
