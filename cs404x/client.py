@@ -55,6 +55,15 @@ async def _on_info(
     return state
 
 
+async def _on_warning(
+    _: WebSocketClientProtocol,
+    state: ClientState,
+    message: Message,
+) -> ClientState:
+    logging.warning(message.value)
+    return state
+
+
 async def _on_queued(
     _: WebSocketClientProtocol,
     state: ClientState,
@@ -169,6 +178,7 @@ async def client(
 
             on_event_handler: dict[MessageKind, EventHandler] = {
                 MessageKind.INFO: _on_info,
+                MessageKind.WARNING: _on_warning,
                 MessageKind.QUEUED: _on_queued,
                 MessageKind.START: _on_start,
                 MessageKind.END: _on_end,
