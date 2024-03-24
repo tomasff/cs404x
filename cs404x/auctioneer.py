@@ -141,8 +141,8 @@ class Auctioneer:
         return False
 
     def finish_round(self) -> RoundSummary:
-        self._update_scores()
         self._compute_round_winner()
+        self._update_scores()
 
         round_summary = RoundSummary(
             auction_start=self._auction_start,
