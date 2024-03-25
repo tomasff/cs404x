@@ -130,7 +130,12 @@ class Auctioneer:
         }
 
     def get_participant_state(self, user_id: str):
-        return self._players[user_id].to_dict()
+        state = self._players[user_id].to_dict()
+
+        state["bot_unique_id"] = user_id
+        state["bot_name"] = user_id
+
+        return state
 
     def register_bid(self, player_id: str, bid: float) -> bool:
         if bid <= self._players[player_id].budget:

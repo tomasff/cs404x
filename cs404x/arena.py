@@ -203,7 +203,7 @@ class Arena:
             participant_state = {
                 **summary_auction_state,
                 "my_bot_details": all_participants_state[participant.user_id],
-                "bots": all_participants_state,
+                "bots": list(all_participants_state.values()),
             }
 
             asyncio.create_task(
