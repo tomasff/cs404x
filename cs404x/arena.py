@@ -35,7 +35,7 @@ async def broadcast_message(
 class Arena:
     _MIN_PLAYERS = 2
     _TIMEOUT_START = 0
-    _BID_TIMEOUT = 0.10
+    _BID_TIMEOUT = 1.5
 
     def __init__(self):
         self._registration_lock = asyncio.Lock()
