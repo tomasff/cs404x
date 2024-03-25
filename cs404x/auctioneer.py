@@ -138,6 +138,9 @@ class Auctioneer:
         return state
 
     def register_bid(self, player_id: str, bid: float) -> bool:
+        # "Round" bids as done in the original Auctioneer (used for marking).
+        bid = int(bid)
+
         if bid <= self._players[player_id].budget:
             self._players[player_id].current_bid = bid
             return True
