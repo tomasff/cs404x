@@ -78,6 +78,7 @@ class Arena:
                     MessageKind.QUEUED,
                     value={
                         "is_in_game": self.in_game,
+                        "participant_id": participant.user_id,
                         "in_game_count": len(self._participants_in_game),
                         "waiting_count": len(self._participants_waiting),
                     },

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Awaitable
+from typing import Any, Awaitable, Optional
 from urllib.parse import quote_plus
 
 import msgspec
@@ -24,6 +24,7 @@ def save_auction_telemetry(path: Path, telemetry: list[dict[Any, Any]]):
             fieldnames=[
                 "auction_start",
                 "current_round",
+                "round_winner_is_you",
                 "round_winner",
                 "painting",
                 "amount_paid",
@@ -39,6 +40,7 @@ class ClientState:
     bot: Any
     bot_cls: type
     telemetry_base: Path
+    participant_id: Optional[str] = None
     auctions_won: int = 0
     auctions_total: int = 0
     current_auction_telemetry: list[Any] = dataclasses.field(
@@ -70,7 +72,9 @@ async def _on_queued(
     message: Message,
 ) -> ClientState:
     logging.info("Waiting in the queue: %s", message.value)
-    return state
+    return dataclasses.replace(
+        state, participant_id=message.value["participant_id"],
+    )
 
 
 async def _on_start(
@@ -127,7 +131,20 @@ async def _on_telemetry(
         "Received auction round telemetry: %s.",
         message.value,
     )
-    state.current_auction_telemetry.append(message.value)
+
+    round_winner_is_you = state.participant_id == message.value["round_winner"]
+
+    if state.participant_id is None:
+        logging.warning(
+            "Your participant ID is unknown, the provided auction logs may be inaccurate."
+        )
+
+    state.current_auction_telemetry.append(
+        {
+            **message.value,
+            "round_winner_is_you": round_winner_is_you,
+        }
+    )
 
     return state
 
