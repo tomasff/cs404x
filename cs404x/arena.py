@@ -132,7 +132,7 @@ class Arena:
                     self._all_bids_received_event.wait(),
                     self._BID_TIMEOUT,
                 )
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 logging.warning("Did not receive all bids...continuing")
 
         if len(self._participants_in_game) < self._MIN_PLAYERS:
